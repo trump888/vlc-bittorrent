@@ -5,7 +5,6 @@ AUTOMAKE_OPTIONS = subdir-objects
 
 # Great and cool CFLAGS
 COOLCFLAGS = \
-	-Wno-deprecated-declarations \
 	-Wall \
 	-Wextra \
 	-Wconversion \
