@@ -31,7 +31,7 @@ target_compile_definitions(
 target_compile_features(
   access_bittorrent_plugin
     PUBLIC
-      cxx_std_14
+      cxx_std_17
 )
 
 target_link_libraries(
@@ -46,7 +46,7 @@ target_link_libraries(
 set_target_properties(
   access_bittorrent_plugin
     PROPERTIES
-      CXX_STANDARD 14
+      CXX_STANDARD 17
       CXX_STANDARD_REQUIRED YES
       CXX_VISIBILITY_PRESET hidden
 )
