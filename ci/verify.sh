@@ -13,8 +13,12 @@
 #      (these would require shipping extra runtime DLLs alongside VLC)
 #   5. built.dll links msvcrt.dll (NOT ucrtbase.dll) — matches official VLC
 #   6. Cross-check the entry symbol name against the official plugin
+#
+# This script uses ci/pe_inspect.py (pure Python PE parser) instead of
+# objdump, because objdump's output format varies between binutils versions
+# and caused silent parsing failures on Ubuntu 24.04 runners.
 
-set -euo pipefail
+set -uo pipefail
 
 if [ "$#" -ne 3 ]; then
     echo "Usage: $0 <built.dll> <official_plugin.dll> <official_libvlccore.dll>" >&2
@@ -25,7 +29,10 @@ BUILT="$1"
 OFFICIAL_PLUGIN="$2"
 OFFICIAL_LIBVLCCORE="$3"
 
-OBJDUMP=i686-w64-mingw32-objdump
+# Resolve script directory so we can find pe_inspect.py regardless of CWD
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PE_INSPECT="python3 ${SCRIPT_DIR}/pe_inspect.py"
+
 FAIL=0
 
 ok() { echo "  [PASS] $1"; }
@@ -40,20 +47,23 @@ echo ""
 # ---- 1. Architecture ----
 echo "[1/6] Architecture check"
 FILE_OUT=$(file "$BUILT")
-case "$FILE_OUT" in
-    *"PE32 executable for MS Windows 4.00 (DLL), Intel i386"*)
-        ok "PE32 Intel i386 (32-bit, matches official win32)"
-        ;;
-    *)
-        err "Not a PE32 i386 DLL: $FILE_OUT"
-        ;;
-esac
+# `file` output varies between versions:
+#   file 5.44 (Debian trixie): "PE32 executable for MS Windows 4.00 (DLL), Intel i386, ..."
+#   file 5.45 (Ubuntu 24.04):  "PE32 executable (DLL) (console) Intel 80386, for MS Windows, ..."
+# Match on the key tokens: "PE32" + "i386" or "80386" + "DLL"
+if echo "$FILE_OUT" | grep -q "PE32" \
+   && echo "$FILE_OUT" | grep -qE "Intel (i386|80386)" \
+   && echo "$FILE_OUT" | grep -q "DLL"; then
+    ok "PE32 Intel i386 (32-bit, matches official win32)"
+else
+    err "Not a PE32 i386 DLL: $FILE_OUT"
+fi
 echo ""
 
 # ---- 2. Export symbol ----
 echo "[2/6] Exported symbol check"
-BUILT_EXPORTS=$($OBJDUMP -p "$BUILT" 2>/dev/null | grep -E '^[[:space:]]+\[[[:space:]]*[0-9]+\][[:space:]]*\+base' | grep -v 'Export RVA' | awk '{print $NF}')
-OFFICIAL_EXPORTS=$($OBJDUMP -p "$OFFICIAL_PLUGIN" 2>/dev/null | grep -E '^[[:space:]]+\[[[:space:]]*[0-9]+\][[:space:]]*\+base' | grep -v 'Export RVA' | awk '{print $NF}')
+BUILT_EXPORTS=$($PE_INSPECT exports "$BUILT" 2>/dev/null)
+OFFICIAL_EXPORTS=$($PE_INSPECT exports "$OFFICIAL_PLUGIN" 2>/dev/null)
 
 # We need at minimum vlc_entry__3_0_0f
 if echo "$BUILT_EXPORTS" | grep -qx "vlc_entry__3_0_0f"; then
@@ -74,7 +84,7 @@ echo ""
 
 # ---- 3. Imports libvlccore.dll ----
 echo "[3/6] libvlccore.dll import check"
-BUILT_IMPORTS=$($OBJDUMP -p "$BUILT" 2>/dev/null | grep -E '^[[:space:]]+DLL Name:' | awk '{print $3}' | sort -u)
+BUILT_IMPORTS=$($PE_INSPECT imports "$BUILT" 2>/dev/null)
 if echo "$BUILT_IMPORTS" | grep -qx "libvlccore.dll"; then
     ok "Built plugin imports libvlccore.dll (links against VLC core, as official plugins do)"
 else
@@ -85,7 +95,7 @@ echo ""
 
 # ---- 4. No GCC runtime DLLs ----
 echo "[4/6] Static runtime check (no libgcc_s_*, libstdc++-*, libwinpthread-*)"
-BANNED_PATTERNS='libgcc_s_.*-1\.dll|libstdc\+\+-6\.dll|libwinpthread-1\.dll'
+BANNED_PATTERNS='libgcc_s_.*\.dll|libstdc\+\+.*\.dll|libwinpthread.*\.dll'
 BANNED=$(echo "$BUILT_IMPORTS" | grep -E "$BANNED_PATTERNS" || true)
 if [ -z "$BANNED" ]; then
     ok "No GCC runtime DLLs in import table (all statically linked)"
@@ -111,7 +121,7 @@ echo ""
 
 # ---- 6. Cross-check against official plugin ----
 echo "[6/6] Cross-check with official plugin"
-OFFICIAL_IMPORTS=$($OBJDUMP -p "$OFFICIAL_PLUGIN" 2>/dev/null | grep -E '^[[:space:]]+DLL Name:' | awk '{print $3}' | sort -u)
+OFFICIAL_IMPORTS=$($PE_INSPECT imports "$OFFICIAL_PLUGIN" 2>/dev/null)
 echo "       Official plugin imports:"
 echo "$OFFICIAL_IMPORTS" | sed 's/^/         /'
 echo ""
@@ -125,7 +135,7 @@ MISSING=""
 for d in $OFFICIAL_IMPORTS; do
     if ! echo "$BUILT_IMPORTS" | grep -qx "$d"; then
         case "$d" in
-            ADVAPI32.dll|SHLWAPI.dll|ole32.dll|OLEAUT32.dll|GDI32.dll|USER32.dll)
+            advapi32.dll|shlwapi.dll|ole32.dll|oleaut32.dll|gdi32.dll|user32.dll)
                 # These are common system DLLs that some plugins use and others don't
                 ;;
             *)
