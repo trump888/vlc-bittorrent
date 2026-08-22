@@ -73,6 +73,17 @@ jobs:
           echo "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
           mkdir -p "${PREFIX}/lib/pkgconfig" "${PREFIX}/include" "${PREFIX}/lib"
 
+      # Ubuntu's libboost-dev ships only headers (no BoostConfig.cmake),
+      # and CMake 3.30+ (preinstalled on ubuntu-24.04 runners at /usr/local)
+      # removed FindBoost.cmake entirely (CMP0167). Without this workaround,
+      # find_package(Boost REQUIRED) in libtorrent's CMakeLists fails with:
+      #     Could NOT find Boost (missing: Boost_INCLUDE_DIR)
+      - name: Provide Boost CMake config (for CMake 3.30+)
+        run: |
+          bash ci/make-boost-config.sh "${PREFIX}" /usr/include
+          # Tell libtorrent's find_package(Boost) where to look
+          echo "Boost_DIR=${PREFIX}/lib/cmake/Boost" >> $GITHUB_ENV
+
       # ---- Cache third-party sources (don't rebuild on every commit) ----
 
       - name: Cache VLC sources
@@ -164,6 +175,7 @@ jobs:
             -Dpython-bindings=OFF \
             -Ddht=ON \
             -Dexceptions=ON \
+            -DBoost_DIR="${PREFIX}/lib/cmake/Boost" \
             -G Ninja
           cmake --build libtorrent-build -j"$(nproc)"
           cmake --install libtorrent-build
