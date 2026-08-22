@@ -1,0 +1,278 @@
+name: Build win32 plugin (for official VLC 3.0.x)
+
+# Cross-compiles vlc-bittorrent for the official VideoLAN VLC 3.0.x win32
+# release. The output DLL is binary-compatible with the plugins shipped in
+# vlc-3.0.x-win32.{zip,exe,msi} from download.videolan.org.
+#
+# Triggers:
+#   - push to master/main          : build + verify, upload artifact
+#   - pull request                 : build + verify, upload artifact
+#   - tag v*                       : build + verify + create GitHub Release
+#   - workflow_dispatch (manual)   : build + verify, upload artifact
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+    inputs:
+      vlc_version:
+        description: 'VLC version to target (e.g. 3.0.23)'
+        required: false
+        default: '3.0.23'
+      libtorrent_version:
+        description: 'libtorrent-rasterbar version'
+        required: false
+        default: '2.0.10'
+
+# Required by softprops/action-gh-release on tag pushes
+permissions:
+  contents: write
+
+jobs:
+  build-win32:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    env:
+      # Pin versions (overridable via workflow_dispatch inputs)
+      VLC_VERSION: ${{ github.event.inputs.vlc_version || '3.0.23' }}
+      LIBTORRENT_VERSION: ${{ github.event.inputs.libtorrent_version || '2.0.10' }}
+      HOST: i686-w64-mingw32
+      PREFIX: ${{ github.workspace }}/prefix
+
+    steps:
+      - name: Checkout vlc-bittorrent
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc-mingw-w64-i686 \
+            g++-mingw-w64-i686 \
+            binutils-mingw-w64-i686 \
+            mingw-w64-i686-dev \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libboost-dev \
+            python3 \
+            zip \
+            unzip
+          # Verify the cross compiler is reachable
+          ${HOST}-gcc --version | head -1
+
+      - name: Configure environment
+        run: |
+          echo "CC=${HOST}-gcc"         >> $GITHUB_ENV
+          echo "CXX=${HOST}-g++"        >> $GITHUB_ENV
+          echo "STRIP=${HOST}-strip"    >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
+          mkdir -p "${PREFIX}/lib/pkgconfig" "${PREFIX}/include" "${PREFIX}/lib"
+
+      # ---- Cache third-party sources (don't rebuild on every commit) ----
+
+      - name: Cache VLC sources
+        id: cache-vlc
+        uses: actions/cache@v4
+        with:
+          path: |
+            vlc-src
+            vlc-win32
+          key: vlc-${{ env.VLC_VERSION }}-r1
+
+      - name: Download VLC source + win32 zip
+        if: steps.cache-vlc.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          curl -fsSL -o vlc.tar.xz \
+            "https://download.videolan.org/pub/videolan/vlc/${VLC_VERSION}/vlc-${VLC_VERSION}.tar.xz"
+          mkdir -p vlc-src
+          tar xf vlc.tar.xz -C vlc-src --strip-components=1
+          curl -fsSL -o vlc-win32.zip \
+            "https://download.videolan.org/pub/videolan/vlc/${VLC_VERSION}/win32/vlc-${VLC_VERSION}-win32.zip"
+          mkdir -p vlc-win32
+          unzip -q vlc-win32.zip -d vlc-win32
+          # The zip extracts to vlc-win32/vlc-<version>/
+
+      - name: Cache libtorrent source
+        id: cache-lt
+        uses: actions/cache@v4
+        with:
+          path: libtorrent-src
+          key: libtorrent-${{ env.LIBTORRENT_VERSION }}-r1
+
+      - name: Download libtorrent source
+        if: steps.cache-lt.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          curl -fsSL -o lt.tar.gz \
+            "https://github.com/arvidn/libtorrent/releases/download/v${LIBTORRENT_VERSION}/libtorrent-rasterbar-${LIBTORRENT_VERSION}.tar.gz"
+          mkdir -p libtorrent-src
+          tar xf lt.tar.gz -C libtorrent-src --strip-components=1
+
+      # ---- Generate import libraries from official VLC DLLs ----
+      # This is the trick that makes the plugin binary-compatible with the
+      # official VLC: we link against the exact same libvlccore.dll exports.
+
+      - name: Generate libvlccore.a + libvlc.a import libraries
+        run: |
+          set -e
+          VLC_INSTALL=$(ls -d vlc-win32/vlc-*/ | head -1)
+          echo "VLC install dir: $VLC_INSTALL"
+          python3 ci/dll_to_def.py "${VLC_INSTALL}libvlccore.dll" /tmp/libvlccore.def libvlccore.dll
+          python3 ci/dll_to_def.py "${VLC_INSTALL}libvlc.dll"     /tmp/libvlc.def     libvlc.dll
+          ${HOST}-dlltool --dllname libvlccore.dll --def /tmp/libvlccore.def \
+            --output-lib "${PREFIX}/lib/libvlccore.a" -k
+          ${HOST}-dlltool --dllname libvlc.dll     --def /tmp/libvlc.def \
+            --output-lib "${PREFIX}/lib/libvlc.a" -k
+          ls -la "${PREFIX}/lib/"*.a
+
+      - name: Install vlc-plugin.pc + libvlc.pc
+        run: |
+          set -e
+          VLC_SRC="$GITHUB_WORKSPACE/vlc-src"
+          sed -e "s|@PREFIX@|${PREFIX}|g" \
+              -e "s|@VLC_SRC@|${VLC_SRC}|g" \
+              -e "s|@VLC_VERSION@|${VLC_VERSION}|g" \
+              ci/vlc-plugin.pc.in > "${PREFIX}/lib/pkgconfig/vlc-plugin.pc"
+          sed -e "s|@PREFIX@|${PREFIX}|g" \
+              -e "s|@VLC_SRC@|${VLC_SRC}|g" \
+              -e "s|@VLC_VERSION@|${VLC_VERSION}|g" \
+              ci/libvlc.pc.in > "${PREFIX}/lib/pkgconfig/libvlc.pc"
+          echo "=== vlc-plugin.pc ==="
+          cat "${PREFIX}/lib/pkgconfig/vlc-plugin.pc"
+
+      # ---- Build libtorrent (static) ----
+
+      - name: Build libtorrent-rasterbar (static)
+        run: |
+          set -e
+          cmake -S libtorrent-src -B libtorrent-build \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/ci/toolchain-mingw-i686.cmake" \
+            -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF \
+            -Dstatic_runtime=ON \
+            -Dencryption=OFF \
+            -Dbuild_tests=OFF \
+            -Dbuild_examples=OFF \
+            -Dbuild_tools=OFF \
+            -Dpython-bindings=OFF \
+            -Ddht=ON \
+            -Dexceptions=ON \
+            -G Ninja
+          cmake --build libtorrent-build -j"$(nproc)"
+          cmake --install libtorrent-build
+          ls -la "${PREFIX}/lib/libtorrent-rasterbar.a"
+          cat "${PREFIX}/lib/pkgconfig/libtorrent-rasterbar.pc"
+
+      # ---- Build vlc-bittorrent plugin ----
+
+      - name: Build vlc-bittorrent plugin
+        run: |
+          set -e
+          cmake -S . -B build \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/ci/toolchain-mingw-i686.cmake" \
+            -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -G Ninja
+          cmake --build build -j"$(nproc)"
+          # Strip debug symbols
+          ${HOST}-strip --strip-all build/src/libaccess_bittorrent_plugin.dll
+          ls -la build/src/libaccess_bittorrent_plugin.dll
+
+      # ---- ABI verification (compare with official plugin) ----
+
+      - name: Verify ABI compatibility
+        run: |
+          set -e
+          VLC_INSTALL=$(ls -d vlc-win32/vlc-*/ | head -1)
+          ci/verify.sh \
+            build/src/libaccess_bittorrent_plugin.dll \
+            "${VLC_INSTALL}plugins/access/libfilesystem_plugin.dll" \
+            "${VLC_INSTALL}libvlccore.dll"
+
+      # ---- Package ----
+
+      - name: Package artifact
+        id: package
+        run: |
+          set -e
+          VERSION=$(grep -E 'AC_INIT' configure.ac 2>/dev/null | \
+            sed -E 's/.*vlc-plugin-bittorrent, *([^,]+),.*/\1/' || echo "0.0.0")
+          echo "Plugin version: $VERSION"
+          ARTIFACT_NAME="vlc-bittorrent-${VERSION}-win32-vlc${VLC_VERSION}"
+          echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+
+          mkdir -p artifact
+          cp build/src/libaccess_bittorrent_plugin.dll artifact/
+          # Generate a deployment README
+          cat > artifact/INSTALL.md <<EOF
+          vlc-bittorrent v${VERSION} for official VLC ${VLC_VERSION} (win32 / x86)
+          ----------------------------------------------------------------
+
+          Built from commit: ${{ github.sha }}
+          Built on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          Build job: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+          Files:
+            libaccess_bittorrent_plugin.dll  (5-6 MB, stripped)
+
+          Install:
+            1. Copy libaccess_bittorrent_plugin.dll into:
+                 C:\\Program Files (x86)\\VideoLAN\\VLC\\plugins\\access\\
+            2. Delete VLC's plugin cache so it re-scans:
+                 %APPDATA%\\vlc\\plugins-*.dat
+            3. Start VLC and open a .torrent file or magnet link.
+
+          Verified:
+            - PE32 Intel i386 (matches official win32 build)
+            - Exports vlc_entry__3_0_0f (matches official plugin ABI)
+            - Links msvcrt.dll + libvlccore.dll (no ucrt, no libgcc/libstdc++ DLLs)
+
+          Known limitations:
+            - libtorrent encryption is disabled (no OpenSSL linked);
+              private trackers that mandate encryption will not work.
+            - 32-bit only; will not load in 64-bit VLC.
+          EOF
+          # Also include repo README if present
+          [ -f README.md ] && cp README.md artifact/README.md
+          (cd artifact && zip -q "../${ARTIFACT_NAME}.zip" .)
+          ls -la "${ARTIFACT_NAME}.zip"
+          echo "Full artifact path: $GITHUB_WORKSPACE/${ARTIFACT_NAME}.zip"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: |
+            ${{ steps.package.outputs.artifact_name }}.zip
+            build/src/libaccess_bittorrent_plugin.dll
+          retention-days: 30
+
+      # ---- Create GitHub Release on tag push ----
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.package.outputs.artifact_name }}.zip
+            build/src/libaccess_bittorrent_plugin.dll
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## vlc-bittorrent win32 build
+
+            Built for **official VLC ${{ env.VLC_VERSION }}** (win32 / x86).
+
+            **Install:** copy `libaccess_bittorrent_plugin.dll` into
+            `C:\Program Files (x86)\VideoLAN\VLC\plugins\access\`, then delete
+            `%APPDATA%\vlc\plugins-*.dat`.
+
+            See `INSTALL.md` inside the zip for full details.
