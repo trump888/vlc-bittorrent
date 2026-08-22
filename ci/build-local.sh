@@ -99,6 +99,7 @@ sed -e "s|@PREFIX@|$PREFIX|g" \
 echo "[5/7] Building libtorrent-rasterbar (static)..."
 cmake -S "$WORKDIR/libtorrent-src" -B "$WORKDIR/libtorrent-build" \
     -DCMAKE_TOOLCHAIN_FILE="$PROJECT_ROOT/ci/toolchain-mingw-i686.cmake" \
+    -DCMAKE_FIND_ROOT_PATH="/usr/i686-w64-mingw32;$PREFIX" \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_SHARED_LIBS=OFF \
@@ -110,6 +111,7 @@ cmake -S "$WORKDIR/libtorrent-src" -B "$WORKDIR/libtorrent-build" \
     -Dpython-bindings=OFF \
     -Ddht=ON \
     -Dexceptions=ON \
+    -DBoost_DIR="$PREFIX/lib/cmake/Boost" \
     -G Ninja
 cmake --build "$WORKDIR/libtorrent-build" -j"$(nproc)"
 cmake --install "$WORKDIR/libtorrent-build"
@@ -118,8 +120,11 @@ cmake --install "$WORKDIR/libtorrent-build"
 echo "[6/7] Building vlc-bittorrent plugin..."
 cmake -S "$PROJECT_ROOT" -B "$WORKDIR/vlc-bittorrent-build" \
     -DCMAKE_TOOLCHAIN_FILE="$PROJECT_ROOT/ci/toolchain-mingw-i686.cmake" \
+    -DCMAKE_FIND_ROOT_PATH="/usr/i686-w64-mingw32;$PREFIX" \
     -DCMAKE_INSTALL_PREFIX="$PREFIX" \
     -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_PREFIX_PATH="$PREFIX" \
+    -DBUILD_TESTING=OFF \
     -G Ninja
 cmake --build "$WORKDIR/vlc-bittorrent-build" -j"$(nproc)"
 

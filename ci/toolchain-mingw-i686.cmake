@@ -3,14 +3,33 @@
 #   - mingw-w64 i686 (Debian/Ubuntu)
 #   - msvcrt.dll (NOT ucrt)
 #   - Static libgcc / libstdc++ / libwinpthread (no extra runtime DLLs)
+#
+# IMPORTANT: This toolchain looks up CMAKE_FIND_ROOT_PATH from the cmake
+# variable CMAKE_FIND_ROOT_PATH (which can be set via -D on the command line
+# or via the parent project's cache). It also falls back to $ENV{PREFIX} for
+# backwards compatibility with the local build script.
+#
+# We deliberately do NOT hardcode a path here, because:
+#   1. The CI runner's prefix differs from a local dev machine's prefix.
+#   2. Relying on $ENV{PREFIX} alone is fragile — GitHub Actions' env: block
+#      may not be visible to the toolchain file at the moment CMake first
+#      reads it. Passing -DCMAKE_FIND_ROOT_PATH=... explicitly on the cmake
+#      command line is reliable.
 
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR x86)
 
-# Search path: cross sysroot first, then project prefix
-set(CMAKE_FIND_ROOT_PATH
-    "/usr/i686-w64-mingw32"
-    "$ENV{PREFIX}")
+# Build the find root path: mingw sysroot + project prefix.
+# CMAKE_FIND_ROOT_PATH can be passed as -D on the cmake command line; if it's
+# set there, that value wins. Otherwise we fall back to $ENV{PREFIX} for
+# local builds.
+if(NOT DEFINED CMAKE_FIND_ROOT_PATH)
+    if(DEFINED ENV{PREFIX})
+        set(CMAKE_FIND_ROOT_PATH "/usr/i686-w64-mingw32" "$ENV{PREFIX}")
+    else()
+        set(CMAKE_FIND_ROOT_PATH "/usr/i686-w64-mingw32")
+    endif()
+endif()
 
 set(CMAKE_C_COMPILER   i686-w64-mingw32-gcc)
 set(CMAKE_CXX_COMPILER i686-w64-mingw32-g++)
@@ -36,14 +55,8 @@ set(CMAKE_EXE_LINKER_FLAGS_INIT     "-static-libgcc -static-libstdc++ -static -l
 set(CMAKE_SHARED_LINKER_FLAGS_INIT  "-static-libgcc -static-libstdc++ -static -lpthread")
 set(CMAKE_MODULE_LINKER_FLAGS_INIT  "-static-libgcc -static-libstdc++ -static -lpthread")
 
-# Boost: use the host's libboost-dev headers (they're platform-independent).
-# On Ubuntu 24.04 this is Boost 1.83.0 at /usr/include.
-#
-# CMake 3.30+ removed FindBoost.cmake (CMP0167), and Ubuntu's libboost-dev
-# doesn't ship a BoostConfig.cmake, so ci/make-boost-config.sh generates one
-# pointing at /usr/include. find_package(Boost) then picks it up via:
-#   - $ENV{Boost_DIR} set by the workflow (to <prefix>/lib/cmake/Boost)
-#   - CMAKE_FIND_ROOT_PATH including $ENV{PREFIX}
-# We deliberately do NOT set BOOST_ROOT here — it triggers a warning under
-# CMP0167 and gets ignored anyway.
+# Boost: handled separately by ci/make-boost-config.sh, which copies the
+# platform-independent Boost headers into <prefix>/include/boost/ and
+# generates a BoostConfig.cmake pointing there. find_package(Boost) then
+# picks it up via CMAKE_FIND_ROOT_PATH.
 set(Boost_NO_BOOST_CMAKE OFF CACHE BOOL "")
