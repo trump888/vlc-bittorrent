@@ -291,38 +291,24 @@ jobs:
           echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
 
           mkdir -p artifact
+          # Copy the stripped DLL
           cp build/src/libaccess_bittorrent_plugin.dll artifact/
-          # Generate a deployment README
-          cat > artifact/INSTALL.md <<EOF
-          vlc-bittorrent v${VERSION} for official VLC ${VLC_VERSION} (win32 / x86)
-          ----------------------------------------------------------------
-
-          Built from commit: ${{ github.sha }}
-          Built on: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          Build job: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-
-          Files:
-            libaccess_bittorrent_plugin.dll  (5-6 MB, stripped)
-
-          Install:
-            1. Copy libaccess_bittorrent_plugin.dll into:
-                 C:\\Program Files (x86)\\VideoLAN\\VLC\\plugins\\access\\
-            2. Delete VLC's plugin cache so it re-scans:
-                 %APPDATA%\\vlc\\plugins-*.dat
-            3. Start VLC and open a .torrent file or magnet link.
-
-          Verified:
-            - PE32 Intel i386 (matches official win32 build)
-            - Exports vlc_entry__3_0_0f (matches official plugin ABI)
-            - Links msvcrt.dll + libvlccore.dll (no ucrt, no libgcc/libstdc++ DLLs)
-
-          Known limitations:
-            - libtorrent encryption is disabled (no OpenSSL linked);
-              private trackers that mandate encryption will not work.
-            - 32-bit only; will not load in 64-bit VLC.
-          EOF
+          # Generate INSTALL.md from template (avoids heredoc-in-YAML pitfalls)
+          sed -e "s|@VERSION@|${VERSION}|g" \
+              -e "s|@VLC_VERSION@|${VLC_VERSION}|g" \
+              -e "s|@COMMIT_SHA@|${{ github.sha }}|g" \
+              -e "s|@BUILD_DATE@|$(date -u +'%Y-%m-%d %H:%M:%S UTC')|g" \
+              -e "s|@BUILD_JOB_URL@|${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|g" \
+              ci/INSTALL.md.in > artifact/INSTALL.md
           # Also include repo README if present
           [ -f README.md ] && cp README.md artifact/README.md
+          # Verify artifact dir is non-empty before zipping
+          echo "=== artifact/ contents ==="
+          ls -la artifact/
+          if [ -z "$(ls -A artifact)" ]; then
+            echo "[FAIL] artifact/ is empty — nothing to zip"
+            exit 1
+          fi
           (cd artifact && zip -q "../${ARTIFACT_NAME}.zip" .)
           ls -la "${ARTIFACT_NAME}.zip"
           echo "Full artifact path: $GITHUB_WORKSPACE/${ARTIFACT_NAME}.zip"
