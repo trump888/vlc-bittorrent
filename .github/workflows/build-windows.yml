@@ -49,12 +49,12 @@ jobs:
         run: |
           mkdir -p artifact
           
-          # 先定位 DLL 实际路径，别假设固定位置
-          PLUGIN_DLL=$(find build -name "libbittorrent_plugin.dll" -o -name "bittorrent_plugin.dll" 2>/dev/null | head -1)
+          # 按 VLC 插件命名惯例搜索：libaccess_bittorrent_plugin.dll
+          PLUGIN_DLL=$(find build -name "*bittorrent_plugin.dll" 2>/dev/null | head -1)
           
           if [ -z "$PLUGIN_DLL" ]; then
-            echo "ERROR: 找不到插件 DLL，列出 build 目录实际内容："
-            find build -type f \( -name "*.dll" -o -name "*.exe" \) 2>/dev/null
+            echo "ERROR: 找不到插件 DLL"
+            find build -type f -name "*.dll" 2>/dev/null
             exit 1
           fi
           
@@ -73,7 +73,6 @@ jobs:
           }
           
           collect_deps "$PLUGIN_DLL"
-          collect_deps /ucrt64/bin/libtorrent-rasterbar.dll
           
           echo "=== Collected files ==="
           ls -la artifact/
