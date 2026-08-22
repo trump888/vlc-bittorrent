@@ -269,7 +269,11 @@ jobs:
         run: |
           set -e
           VLC_INSTALL=$(ls -d vlc-win32/vlc-*/ | head -1)
-          ci/verify.sh \
+          # Use `bash` explicitly — scripts checked into git may not preserve
+          # the executable bit on Windows checkouts, and `actions/checkout`
+          # doesn't always restore +x. Calling `bash ci/verify.sh` works
+          # regardless of file mode.
+          bash ci/verify.sh \
             build/src/libaccess_bittorrent_plugin.dll \
             "${VLC_INSTALL}plugins/access/libfilesystem_plugin.dll" \
             "${VLC_INSTALL}libvlccore.dll"
