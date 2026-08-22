@@ -140,7 +140,9 @@ def main():
         dll_path.rsplit('/', 1)[-1]
 
     names = parse_pe_exports(dll_path)
-    with open(out_def, 'w', newline='\r\n') as f:
+    # Use newline='\n' so Python doesn't translate our \r\n into \r\r\n.
+    # We write literal \r\n in the format strings below.
+    with open(out_def, 'w', newline='\n') as f:
         f.write(f'LIBRARY {dll_basename}\r\n')
         f.write('EXPORTS\r\n')
         for n in names:
