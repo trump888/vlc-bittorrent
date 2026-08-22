@@ -1,0 +1,11 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=@VLC_SRC@/include
+pluginsdir=@VLC_SRC@/include
+
+Name: vlc-plugin
+Description: VLC plugin C API (target: official win32 @VLC_VERSION@)
+Version: @VLC_VERSION@
+Cflags: -I${includedir} -I${pluginsdir} -D__PLUGIN__ -DMODULE_STRING=\"bittorrent\"
+Libs: -L${libdir} -lvlccore

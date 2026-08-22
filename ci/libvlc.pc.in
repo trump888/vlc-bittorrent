@@ -1,0 +1,10 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=@VLC_SRC@/include
+
+Name: libvlc
+Description: VLC external API
+Version: @VLC_VERSION@
+Cflags: -I${includedir}
+Libs: -L${libdir} -lvlc
