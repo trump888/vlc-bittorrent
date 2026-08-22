@@ -79,8 +79,8 @@ jobs:
 
       - name: Verify all DLLs present
         run: |
-          # 确认核心文件都在
-          test -f artifact/libbittorrent_plugin.dll || (echo "FAIL: plugin DLL missing" && exit 1)
+          # 确认核心文件都在（文件名和 Collect 步骤保持一致）
+          test -f artifact/libaccess_bittorrent_plugin.dll || (echo "FAIL: plugin DLL missing" && exit 1)
           test -f artifact/libtorrent-rasterbar.dll || (echo "FAIL: libtorrent DLL missing" && exit 1)
           echo "OK: all core DLLs present"
 
