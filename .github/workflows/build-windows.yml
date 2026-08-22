@@ -2,6 +2,11 @@ name: Build Windows DLL
 
 on:
   workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Git ref to build (tag, branch, or SHA)'
+        required: true
+        default: 'v2.17'
 
 jobs:
   windows:
@@ -14,7 +19,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
-          ref: 'v2.17'   # 用你之前查到的 commit SHA
+          ref: ${{ github.event.inputs.ref || 'v2.17' }}
 
       - name: Set up MSYS2 and install dependencies
         uses: msys2/setup-msys2@v2
@@ -40,17 +45,50 @@ jobs:
           cmake -B build -DENABLE_TESTS=OFF
           cmake --build build -v
 
-      # 新增：列出实际产物，方便排查
-      - name: List build output
+      - name: Collect plugin and dependencies
         run: |
-          find build -name "*.dll" -o -name "*.exe"
-          ls -la build/
+          mkdir -p artifact
+          
+          # 拷贝插件本体
+          cp build/libbittorrent_plugin.dll artifact/
+          
+          # 递归收集所有 MSYS2 依赖 DLL
+          collect_deps() {
+            local dll=$1
+            for dep in $(ldd $dll | grep ucrt64 | awk '{print $3}'); do
+              if [ ! -f "artifact/$(basename $dep)" ]; then
+                cp $dep artifact/
+                collect_deps $dep
+              fi
+            done
+          }
+          
+          collect_deps build/libbittorrent_plugin.dll
+          collect_deps /ucrt64/bin/libtorrent-rasterbar.dll
+          
+          echo "=== Collected files ==="
+          ls -la artifact/
 
-      - name: Upload DLL artifact
+      - name: Verify all DLLs present
+        run: |
+          # 确认核心文件都在
+          test -f artifact/libbittorrent_plugin.dll || (echo "FAIL: plugin DLL missing" && exit 1)
+          test -f artifact/libtorrent-rasterbar.dll || (echo "FAIL: libtorrent DLL missing" && exit 1)
+          echo "OK: all core DLLs present"
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v5
         with:
-          name: libbittorrent_plugin-windows
-          path: |
-            build/**/*.dll
+          name: vlc-bittorrent-windows
+          path: artifact/*
           if-no-files-found: error
           retention-days: 90
+
+      - name: Create Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifact/*
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
