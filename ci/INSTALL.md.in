@@ -1,0 +1,54 @@
+# vlc-bittorrent v@VERSION@ for official VLC @VLC_VERSION@ (win32 / x86)
+
+Built from commit: @COMMIT_SHA@
+Built on: @BUILD_DATE@
+Build job: @BUILD_JOB_URL@
+
+## Files
+
+- `libaccess_bittorrent_plugin.dll` (5-6 MB, stripped)
+
+## Install
+
+1. Copy `libaccess_bittorrent_plugin.dll` into:
+   ```
+   C:\Program Files (x86)\VideoLAN\VLC\plugins\access\
+   ```
+2. Delete VLC's plugin cache so it re-scans for the new plugin:
+   ```
+   %APPDATA%\vlc\plugins-*.dat
+   ```
+   (typically `C:\Users\<you>\AppData\Roaming\vlc\plugins-*.dat`)
+3. Start VLC and open a `.torrent` file or a magnet link:
+   ```
+   vlc video.torrent
+   vlc "magnet:?xt=urn:btih:..."
+   ```
+
+## Verifying it loaded
+
+After launching VLC with a torrent, the message log
+(`Tools` → `Messages`, verbosity 2) should contain lines like:
+
+```
+bittorrent: Bittorrent metadata access
+bittorrent: Bittorrent data access
+bittorrent: Bittorrent magnet metadata access
+```
+
+## Verified ABI compatibility
+
+- PE32 Intel i386 (32-bit, matches official win32 build)
+- Exports `vlc_entry__3_0_0f` (matches official plugin ABI)
+- Links `msvcrt.dll` + `libvlccore.dll` (no ucrt, no libgcc/libstdc++ DLLs)
+- Statically linked libgcc/libstdc++/libwinpthread — no extra runtime DLLs needed
+
+## Known limitations
+
+- **libtorrent encryption is disabled** (no OpenSSL linked); private trackers
+  that mandate protocol encryption will not connect. Public BitTorrent swarms
+  work normally.
+- libtorrent's HTTPS tracker support is unavailable (would require
+  OpenSSL/GnuTLS). HTTP and UDP trackers work.
+- **32-bit only**; will not load in a 64-bit VLC build. Use the official
+  `vlc-@VLC_VERSION@-win32.exe` / `.zip` / `.msi`.
