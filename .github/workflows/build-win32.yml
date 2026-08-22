@@ -154,8 +154,11 @@ jobs:
           echo "libvlc.def:     $(grep -c '^  ' /tmp/libvlc.def) exports"
           # Verify critical symbols are present — if these are missing the
           # .def parser silently broke and the link will fail later.
+          # Note: .def uses CRLF line endings, so we can't anchor with $.
+          # Using `grep -q` (no anchor) is sufficient since these symbol
+          # names are unique enough not to substring-match anything else.
           for sym in vlc_mkdir var_Inherit config_GetUserDir vlc_Log vlc_stream_Read; do
-            if grep -q "^  $sym\$" /tmp/libvlccore.def; then
+            if grep -q "  $sym" /tmp/libvlccore.def; then
               echo "  [PASS] $sym present in libvlccore.def"
             else
               echo "  [FAIL] $sym MISSING from libvlccore.def — link will fail!"
