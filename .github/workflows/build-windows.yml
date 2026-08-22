@@ -49,21 +49,30 @@ jobs:
         run: |
           mkdir -p artifact
           
-          # 拷贝插件本体
-          cp build/libbittorrent_plugin.dll artifact/
+          # 先定位 DLL 实际路径，别假设固定位置
+          PLUGIN_DLL=$(find build -name "libbittorrent_plugin.dll" -o -name "bittorrent_plugin.dll" 2>/dev/null | head -1)
           
-          # 递归收集所有 MSYS2 依赖 DLL
+          if [ -z "$PLUGIN_DLL" ]; then
+            echo "ERROR: 找不到插件 DLL，列出 build 目录实际内容："
+            find build -type f \( -name "*.dll" -o -name "*.exe" \) 2>/dev/null
+            exit 1
+          fi
+          
+          echo "找到插件: $PLUGIN_DLL"
+          cp "$PLUGIN_DLL" artifact/
+          
+          # 递归收集 MSYS2 依赖
           collect_deps() {
             local dll=$1
-            for dep in $(ldd $dll | grep ucrt64 | awk '{print $3}'); do
+            for dep in $(ldd "$dll" | grep ucrt64 | awk '{print $3}'); do
               if [ ! -f "artifact/$(basename $dep)" ]; then
-                cp $dep artifact/
-                collect_deps $dep
+                cp "$dep" artifact/
+                collect_deps "$dep"
               fi
             done
           }
           
-          collect_deps build/libbittorrent_plugin.dll
+          collect_deps "$PLUGIN_DLL"
           collect_deps /ucrt64/bin/libtorrent-rasterbar.dll
           
           echo "=== Collected files ==="
