@@ -309,7 +309,7 @@ jobs:
             echo "[FAIL] artifact/ is empty — nothing to zip"
             exit 1
           fi
-          (cd artifact && zip -q "../${ARTIFACT_NAME}.zip" .)
+          (cd artifact && zip -qr "../${ARTIFACT_NAME}.zip" .)
           ls -la "${ARTIFACT_NAME}.zip"
           echo "Full artifact path: $GITHUB_WORKSPACE/${ARTIFACT_NAME}.zip"
 
