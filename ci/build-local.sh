@@ -78,6 +78,12 @@ python3 "$PROJECT_ROOT/ci/dll_to_def.py" \
 "$HOST-dlltool" --dllname libvlc.dll --def /tmp/libvlc.def \
     --output-lib "$PREFIX/lib/libvlc.a" -k
 
+# Boost headers: use the system libboost-dev, but generate a BoostConfig.cmake
+# so CMake 3.30+ (which removed FindBoost.cmake) can find it.
+echo "[3.5/7] Generating BoostConfig.cmake (for CMake 3.30+)..."
+bash "$PROJECT_ROOT/ci/make-boost-config.sh" "$PREFIX" /usr/include
+export Boost_DIR="$PREFIX/lib/cmake/Boost"
+
 # ---- 4. Install .pc files ----
 echo "[4/7] Installing vlc-plugin.pc + libvlc.pc..."
 sed -e "s|@PREFIX@|$PREFIX|g" \

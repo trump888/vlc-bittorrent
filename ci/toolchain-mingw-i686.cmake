@@ -37,9 +37,13 @@ set(CMAKE_SHARED_LINKER_FLAGS_INIT  "-static-libgcc -static-libstdc++ -static -l
 set(CMAKE_MODULE_LINKER_FLAGS_INIT  "-static-libgcc -static-libstdc++ -static -lpthread")
 
 # Boost: use the host's libboost-dev headers (they're platform-independent).
-# This works on Ubuntu 24.04 (Boost 1.83) and Debian 13 (Boost 1.83).
-set(BOOST_ROOT "/usr" CACHE PATH "")
-set(BOOST_NO_SYSTEM_PATHS OFF CACHE BOOL "")
-set(Boost_USE_STATIC_LIBS ON)
-set(Boost_USE_MULTITHREADED ON)
-set(Boost_USE_STATIC_RUNTIME ON)
+# On Ubuntu 24.04 this is Boost 1.83.0 at /usr/include.
+#
+# CMake 3.30+ removed FindBoost.cmake (CMP0167), and Ubuntu's libboost-dev
+# doesn't ship a BoostConfig.cmake, so ci/make-boost-config.sh generates one
+# pointing at /usr/include. find_package(Boost) then picks it up via:
+#   - $ENV{Boost_DIR} set by the workflow (to <prefix>/lib/cmake/Boost)
+#   - CMAKE_FIND_ROOT_PATH including $ENV{PREFIX}
+# We deliberately do NOT set BOOST_ROOT here — it triggers a warning under
+# CMP0167 and gets ignored anyway.
+set(Boost_NO_BOOST_CMAKE OFF CACHE BOOL "")
