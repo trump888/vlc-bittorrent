@@ -141,13 +141,45 @@ jobs:
           set -e
           VLC_INSTALL=$(ls -d vlc-win32/vlc-*/ | head -1)
           echo "VLC install dir: $VLC_INSTALL"
+          echo ""
+          echo "=== Input DLL sizes ==="
+          ls -la "${VLC_INSTALL}libvlccore.dll" "${VLC_INSTALL}libvlc.dll"
+          echo ""
+          echo "=== Generate .def files (pure-Python PE parser, no objdump dependency) ==="
           python3 ci/dll_to_def.py "${VLC_INSTALL}libvlccore.dll" /tmp/libvlccore.def libvlccore.dll
           python3 ci/dll_to_def.py "${VLC_INSTALL}libvlc.dll"     /tmp/libvlc.def     libvlc.dll
+          echo ""
+          echo "=== .def file sanity check ==="
+          echo "libvlccore.def: $(grep -c '^  ' /tmp/libvlccore.def) exports"
+          echo "libvlc.def:     $(grep -c '^  ' /tmp/libvlc.def) exports"
+          # Verify critical symbols are present — if these are missing the
+          # .def parser silently broke and the link will fail later.
+          for sym in vlc_mkdir var_Inherit config_GetUserDir vlc_Log vlc_stream_Read; do
+            if grep -q "^  $sym\$" /tmp/libvlccore.def; then
+              echo "  [PASS] $sym present in libvlccore.def"
+            else
+              echo "  [FAIL] $sym MISSING from libvlccore.def — link will fail!"
+              exit 1
+            fi
+          done
+          echo ""
+          echo "=== Generate import libraries ==="
           ${HOST}-dlltool --dllname libvlccore.dll --def /tmp/libvlccore.def \
             --output-lib "${PREFIX}/lib/libvlccore.a" -k
           ${HOST}-dlltool --dllname libvlc.dll     --def /tmp/libvlc.def \
             --output-lib "${PREFIX}/lib/libvlc.a" -k
+          echo ""
+          echo "=== Import library sizes (sanity check) ==="
+          # A proper import library for libvlccore.dll should be 500KB-1MB.
+          # If it's only ~2KB, the .def was empty and the link will fail
+          # with "undefined reference to vlc_mkdir" later.
           ls -la "${PREFIX}/lib/"*.a
+          LC_SIZE=$(stat -c%s "${PREFIX}/lib/libvlccore.a")
+          if [ "$LC_SIZE" -lt 100000 ]; then
+            echo "[FAIL] libvlccore.a is only $LC_SIZE bytes — too small, .def parsing must have failed"
+            exit 1
+          fi
+          echo "[PASS] libvlccore.a is $LC_SIZE bytes"
 
       - name: Install vlc-plugin.pc + libvlc.pc
         run: |
