@@ -44,6 +44,9 @@ jobs:
           git clone --depth 1 -b v2.0.11 https://github.com/arvidn/libtorrent.git
           cd libtorrent
           
+          # ← 新增这一行：拉取子模块
+          git submodule update --init --recursive
+          
           mkdir build-static
           cd build-static
           
