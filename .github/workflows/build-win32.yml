@@ -67,11 +67,18 @@ jobs:
 
       - name: Configure environment
         run: |
-          echo "CC=${HOST}-gcc"         >> $GITHUB_ENV
-          echo "CXX=${HOST}-g++"        >> $GITHUB_ENV
-          echo "STRIP=${HOST}-strip"    >> $GITHUB_ENV
+          # IMPORTANT: shell expands ${PREFIX} here, so what gets written to
+          # GITHUB_ENV is the literal absolute path — not the variable name.
+          # This ensures subsequent steps see the right value.
+          echo "CC=${HOST}-gcc"                          >> $GITHUB_ENV
+          echo "CXX=${HOST}-g++"                         >> $GITHUB_ENV
+          echo "STRIP=${HOST}-strip"                     >> $GITHUB_ENV
           echo "PKG_CONFIG_PATH=${PREFIX}/lib/pkgconfig" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=${PREFIX}"             >> $GITHUB_ENV
           mkdir -p "${PREFIX}/lib/pkgconfig" "${PREFIX}/include" "${PREFIX}/lib"
+          # Print what we wrote, for debugging
+          echo "Wrote to GITHUB_ENV:"
+          grep -E '^(CC|CXX|STRIP|PKG_CONFIG_PATH|CMAKE_PREFIX_PATH)=' $GITHUB_ENV || true
 
       # Ubuntu's libboost-dev ships only headers (no BoostConfig.cmake),
       # and CMake 3.30+ (preinstalled on ubuntu-24.04 runners at /usr/local)
@@ -164,6 +171,7 @@ jobs:
           set -e
           cmake -S libtorrent-src -B libtorrent-build \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/ci/toolchain-mingw-i686.cmake" \
+            -DCMAKE_FIND_ROOT_PATH="/usr/i686-w64-mingw32;${PREFIX}" \
             -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_SHARED_LIBS=OFF \
@@ -187,11 +195,34 @@ jobs:
       - name: Build vlc-bittorrent plugin
         run: |
           set -e
+          echo "=== Pre-build diagnostics ==="
+          echo "PREFIX=$PREFIX"
+          echo "PKG_CONFIG_PATH=$PKG_CONFIG_PATH"
+          echo "CMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH"
+          echo ""
+          echo "=== pkg-config reports for vlc-plugin ==="
+          pkg-config --cflags --libs vlc-plugin || echo "pkg-config FAILED"
+          echo ""
+          echo "=== libvlccore.a present? ==="
+          ls -la "${PREFIX}/lib/libvlccore.a" || echo "MISSING libvlccore.a!"
+          echo ""
+          echo "=== vlc-plugin.pc content ==="
+          cat "${PREFIX}/lib/pkgconfig/vlc-plugin.pc"
+          echo ""
+          echo "=== Configure vlc-bittorrent ==="
           cmake -S . -B build \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/ci/toolchain-mingw-i686.cmake" \
+            -DCMAKE_FIND_ROOT_PATH="/usr/i686-w64-mingw32;${PREFIX}" \
             -DCMAKE_INSTALL_PREFIX="${PREFIX}" \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="${PREFIX}" \
+            -DBUILD_TESTING=OFF \
             -G Ninja
+          echo ""
+          echo "=== Link command CMake generated ==="
+          ninja -C build -t commands src/libaccess_bittorrent_plugin.dll 2>&1 | tail -1
+          echo ""
+          echo "=== Building ==="
           cmake --build build -j"$(nproc)"
           # Strip debug symbols
           ${HOST}-strip --strip-all build/src/libaccess_bittorrent_plugin.dll
